@@ -1,0 +1,59 @@
+<!DOCTYPE html>
+<html>
+<head>
+<style>
+body { margin:0; background:#0b1a12; display:flex; flex-direction:column; gap:20px; padding:20px; }
+canvas { display:block; }
+#output { color:white; font-family:monospace; font-size:10px; word-break:break-all; max-height:200px; overflow:auto; }
+</style>
+</head>
+<body>
+<canvas id="c5"></canvas>
+<canvas id="c13"></canvas>
+<div id="output"></div>
+<script src="https://cdn.jsdelivr.net/npm/pdfjs-dist@4.4.168/build/pdf.min.mjs" type="module"></script>
+<script type="module">
+import * as pdfjsLib from 'https://cdn.jsdelivr.net/npm/pdfjs-dist@4.4.168/build/pdf.min.mjs';
+pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdn.jsdelivr.net/npm/pdfjs-dist@4.4.168/build/pdf.worker.min.mjs';
+
+async function renderPage(doc, pageNum, canvasId, scale=2) {
+  const page = await doc.getPage(pageNum);
+  const vp = page.getViewport({scale});
+  const canvas = document.getElementById(canvasId);
+  canvas.width = vp.width;
+  canvas.height = vp.height;
+  await page.render({canvasContext: canvas.getContext('2d'), viewport: vp}).promise;
+  console.log('done', canvasId);
+}
+
+function cropLogo(sourceCanvas, x, y, w, h, bgColor) {
+  const crop = document.createElement('canvas');
+  crop.width = w;
+  crop.height = h;
+  const ctx = crop.getContext('2d');
+  if (bgColor) { ctx.fillStyle = bgColor; ctx.fillRect(0,0,w,h); }
+  ctx.drawImage(sourceCanvas, x, y, w, h, 0, 0, w, h);
+  return crop.toDataURL('image/png');
+}
+
+const doc = await pdfjsLib.getDocument('/multiform.pdf').promise;
+await renderPage(doc, 5, 'c5', 2);
+await renderPage(doc, 13, 'c13', 2);
+
+// Export logo regions as data URLs
+const c5 = document.getElementById('c5');
+
+// Logo 1: White wordmark on green (top-left card) — x:300-1800, y:200-1050
+window.logoGreen = cropLogo(c5, 250, 150, 1700, 900, null);
+
+// Logo 2: Dark horizontal logo on platinum (bottom-left card) — gem+text+subtitle
+window.logoPlatinum = cropLogo(c5, 600, 1450, 1050, 280, '#E9E8E6');
+
+// Logo 3: White wordmark only (from green card, tighter crop around text)
+window.logoWhite = cropLogo(c5, 280, 530, 900, 300, null);
+
+document.getElementById('output').textContent = 'Logos ready: logoGreen, logoPlatinum, logoWhite';
+document.title = 'ready';
+</script>
+</body>
+</html>

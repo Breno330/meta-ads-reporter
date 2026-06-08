@@ -1,0 +1,30 @@
+services:
+  - type: web
+    name: meta-ads-reporter
+    runtime: node
+    plan: free
+    buildCommand: npm install
+    startCommand: node server.js
+    healthCheckPath: /
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: PORT
+        value: 3000
+      - key: META_APP_ID
+        sync: false
+      - key: META_APP_SECRET
+        sync: false
+      - key: REDIRECT_URI
+        sync: false
+      - key: SESSION_SECRET
+        generateValue: true
+      - key: APP_PASSWORD
+        sync: false
+      - key: APP_BASE_URL
+        sync: false
+
+disk:
+  - name: data
+    mountPath: /opt/render/project/src/data
+    sizeGB: 1
