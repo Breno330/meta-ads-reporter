@@ -3,6 +3,8 @@ node_modules/
 
 # Secrets — NUNCA subir para o repositório
 .env
+.env.hml
+.env.prod
 
 # Dados dos clientes (criptografados localmente, configurados no Render via Persistent Disk)
 data/
