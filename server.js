@@ -50,6 +50,10 @@ const notesRoutes   = require('./routes/notes');
 const app  = express();
 const PORT = process.env.PORT || 3000;
 
+// Render, Heroku e outros PaaS ficam atrás de um proxy reverso.
+// Sem isso, cookies secure não são enviados e as sessões não persistem.
+app.set('trust proxy', 1);
+
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 
