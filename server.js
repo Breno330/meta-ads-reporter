@@ -67,7 +67,7 @@ app.use((req, res, next) => {
       "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com",
       "font-src 'self' https://fonts.gstatic.com",
       "img-src 'self' data: blob: https:",
-      "connect-src 'self' https://graph.facebook.com https://www.facebook.com",
+      "connect-src 'self' https://graph.facebook.com https://www.facebook.com https://cdn.jsdelivr.net",
       "frame-ancestors 'none'",
       "object-src 'none'",
       "base-uri 'self'"
