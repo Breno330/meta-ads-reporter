@@ -4204,8 +4204,9 @@ async function openSettingsPage() {
   document.getElementById('empty-state').style.display    = 'none';
   document.getElementById('main-content').style.display   = 'none';
   document.getElementById('history-view').style.display   = 'none';
-  document.getElementById('benchmark-view').style.display = 'none';
-  document.getElementById('settings-page').style.display  = '';
+  document.getElementById('benchmark-view').style.display  = 'none';
+  document.getElementById('creatives-view').style.display  = 'none';
+  document.getElementById('settings-page').style.display   = '';
   switchModalTab('geral');
   await loadMonitorConfig();
 }
