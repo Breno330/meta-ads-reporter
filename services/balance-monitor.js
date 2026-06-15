@@ -37,25 +37,6 @@ async function apiFetch(url, token, attempt = 1) {
 // ── Busca saldo e calcula dias restantes ─────────────────────────────────────
 
 async function getBalanceInfo(token, accountId, days = 7) {
-  const balanceRes  = await apiFetch(`${BASE}/${accountId}?fields=balance,currency,name,funding_source_details,account_status,disable_reason`, token);
-  const balanceData = await balanceRes.json();
-
-  if (balanceData.error) throw new Error(balanceData.error.message);
-
-  // funding_source_details.display_string contém o valor exato exibido no painel do Meta
-  // Ex: "Saldo disponível (R$126,02 BRL)" — já está em reais (não centavos)
-  const displayString = balanceData.funding_source_details?.display_string || '';
-  const match = displayString.match(/R\$([\d.]+,\d{2})/);
-  let balance;
-  if (match) {
-    // Converte formato BR (1.234,56) para float
-    balance = parseFloat(match[1].replace(/\./g, '').replace(',', '.'));
-  } else {
-    // Fallback: campo balance da API (em centavos)
-    balance = parseFloat(balanceData.balance || 0) / 100;
-  }
-  const name = balanceData.name || accountId;
-
   // Busca spend diário para 2× o período (atual + anterior para comparação)
   function toISODate(d) { return d.toISOString().split('T')[0]; }
   const today = new Date();
@@ -82,13 +63,34 @@ async function getBalanceInfo(token, accountId, days = 7) {
 
   const totalFetchDays = isMesAtual ? periodLen * 2 : days * 2;
 
-  const insightRes = await apiFetch(
-    `${BASE}/${accountId}/insights?fields=spend` +
-    `&time_range=${encodeURIComponent(JSON.stringify({ since: toISODate(sinceD), until: toISODate(today) }))}` +
-    `&time_increment=1&level=account&limit=200`,
-    token
-  );
-  const insightData = await insightRes.json();
+  // Saldo e gasto diário são independentes → dispara as duas chamadas em paralelo.
+  // (antes eram sequenciais, dobrando a latência por conta na visão geral)
+  const [balanceRes, insightRes] = await Promise.all([
+    apiFetch(`${BASE}/${accountId}?fields=balance,currency,name,funding_source_details,account_status,disable_reason`, token),
+    apiFetch(
+      `${BASE}/${accountId}/insights?fields=spend` +
+      `&time_range=${encodeURIComponent(JSON.stringify({ since: toISODate(sinceD), until: toISODate(today) }))}` +
+      `&time_increment=1&level=account&limit=200`,
+      token
+    )
+  ]);
+  const [balanceData, insightData] = await Promise.all([balanceRes.json(), insightRes.json()]);
+
+  if (balanceData.error) throw new Error(balanceData.error.message);
+
+  // funding_source_details.display_string contém o valor exato exibido no painel do Meta
+  // Ex: "Saldo disponível (R$126,02 BRL)" — já está em reais (não centavos)
+  const displayString = balanceData.funding_source_details?.display_string || '';
+  const match = displayString.match(/R\$([\d.]+,\d{2})/);
+  let balance;
+  if (match) {
+    // Converte formato BR (1.234,56) para float
+    balance = parseFloat(match[1].replace(/\./g, '').replace(',', '.'));
+  } else {
+    // Fallback: campo balance da API (em centavos)
+    balance = parseFloat(balanceData.balance || 0) / 100;
+  }
+  const name = balanceData.name || accountId;
 
   // Segue paginação se houver (para períodos muito longos)
   let allRows = [...(insightData.data || [])];
@@ -352,7 +354,7 @@ function buildAlertMessage(alerts) {
   const brl = v => new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(v);
 
   const accountLines = alerts.map(a =>
-    `• *${a.name}* — Saldo atual: ${brl(a.balance)} _(limite: ${brl(a.threshold)})_`
+    `• *${telegram.mdSafe(a.name)}* — Saldo atual: ${brl(a.balance)} _(limite: ${brl(a.threshold)})_`
   ).join('\n');
 
   // Verifica se todos os limites são iguais para montar frase genérica ou por conta
@@ -376,7 +378,7 @@ function buildAlertMessage(alerts) {
 
 function buildCampaignStopMessage(stopped) {
   const lines = stopped.map(c =>
-    `• *${c.campaignName}*\n  Conta: ${c.accountName}`
+    `• *${telegram.mdSafe(c.campaignName)}*\n  Conta: ${telegram.mdSafe(c.accountName)}`
   ).join('\n');
 
   return [
@@ -393,7 +395,7 @@ function buildCampaignStopMessage(stopped) {
 function buildBillingAlertMessage(billingAlerts) {
   const lines = billingAlerts.map(a => {
     const paymentInfo = a.paymentMethod ? ` _(${a.paymentMethod})_` : '';
-    return `• *${a.name}*${paymentInfo}\n  ⚠️ ${a.billingIssue.message}`;
+    return `• *${telegram.mdSafe(a.name)}*${paymentInfo}\n  ⚠️ ${a.billingIssue.message}`;
   }).join('\n\n');
 
   const count   = billingAlerts.length;
@@ -561,7 +563,7 @@ async function runWeeklyReportsForUser(userId, reportType) {
       const camps = (data.campaigns || []).sort((a, b) => b.spend - a.spend);
 
       const campLines = camps.map(c => {
-        const lines = [`\n*${c.name}*`];
+        const lines = [`\n*${telegram.mdSafe(c.name)}*`];
         lines.push(`Cliques: ${fmt(c.clicks)}`);
         lines.push(`CTR: ${(c.ctr || 0).toFixed(2)}%`);
         lines.push(`CPM: ${brl(c.cpm)}`);
@@ -613,15 +615,15 @@ async function runWeeklyReportsForUser(userId, reportType) {
         }
 
         if (parts.length > 0) {
-          analysisLines.push(`Na campanha *${c.name}*, ${parts.join(', ')}.`);
+          analysisLines.push(`Na campanha *${telegram.mdSafe(c.name)}*, ${parts.join(', ')}.`);
         }
       }
 
       // ── Sugestão de mensagem ao cliente ──────────────────────────────────
       const clientLines = [];
       for (const c of camps) {
-        if (c.messages > 0)  clientLines.push(`Na campanha *${c.name}* foram ${fmt(c.messages)} mensagens a ${brl(c.costPerMessage)} cada.`);
-        if (c.followers > 0) clientLines.push(`No *${c.name}* conquistamos ${fmt(c.followers)} novos seguidores a ${brl(c.costPerFollower)} cada.`);
+        if (c.messages > 0)  clientLines.push(`Na campanha *${telegram.mdSafe(c.name)}* foram ${fmt(c.messages)} mensagens a ${brl(c.costPerMessage)} cada.`);
+        if (c.followers > 0) clientLines.push(`No *${telegram.mdSafe(c.name)}* conquistamos ${fmt(c.followers)} novos seguidores a ${brl(c.costPerFollower)} cada.`);
       }
 
       // ── Monta e envia mensagem ────────────────────────────────────────────
@@ -650,7 +652,7 @@ async function runWeeklyReportsForUser(userId, reportType) {
         // ── Relatório semanal: formato original ───────────────────────────────
         const tipoLabel = 'SEMANAL';
         msg = [
-          `📊 *RELATÓRIO ${tipoLabel} — ${accountName.toUpperCase()}*`,
+          `📊 *RELATÓRIO ${tipoLabel} — ${telegram.mdSafe(accountName.toUpperCase())}*`,
           ``,
           `Período: ${dateBR(sinceStr)} a ${dateBR(untilStr)} | Plataforma: Meta Ads`,
           ``,

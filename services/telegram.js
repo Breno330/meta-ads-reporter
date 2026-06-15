@@ -1,22 +1,39 @@
 /**
+ * Escapa texto dinâmico (nomes de conta/campanha) para o Markdown legado do
+ * Telegram. Sem isso, um nome com `_ * [ \`` desbalanceado quebra o parsing e
+ * a mensagem inteira é rejeitada com "can't parse entities".
+ * @param {string} s
+ */
+function mdSafe(s) {
+  return String(s ?? '').replace(/([_*[\]`])/g, '\\$1');
+}
+
+/**
  * Envia mensagem via Telegram Bot API
  * @param {string} token   - Token do bot gerado pelo BotFather
  * @param {string} chatId  - ID do chat/usuário destino
  * @param {string} message - Texto da mensagem (suporta Markdown)
  */
 async function send(token, chatId, message) {
-  const url  = `https://api.telegram.org/bot${token}/sendMessage`;
-  const res  = await globalThis.fetch(url, {
-    method:  'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body:    JSON.stringify({
-      chat_id:    chatId,
-      text:       message,
-      parse_mode: 'Markdown'
-    })
-  });
+  const url = `https://api.telegram.org/bot${token}/sendMessage`;
 
-  const data = await res.json();
+  async function post(body) {
+    const res = await globalThis.fetch(url, {
+      method:  'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body:    JSON.stringify(body)
+    });
+    return res.json();
+  }
+
+  // 1ª tentativa: com formatação Markdown
+  let data = await post({ chat_id: chatId, text: message, parse_mode: 'Markdown' });
+
+  // Fallback: se o Markdown quebrar (nome com _ * [ ` desbalanceado), reenvia
+  // em texto puro para garantir a entrega — melhor sem formatação do que não enviar.
+  if (!data.ok && /can'?t parse entities/i.test(data.description || '')) {
+    data = await post({ chat_id: chatId, text: message });
+  }
 
   if (!data.ok) {
     throw new Error(`Telegram API erro: ${data.description || JSON.stringify(data)}`);
@@ -42,4 +59,4 @@ async function sendDocument(token, chatId, filename, htmlContent, caption) {
   return data;
 }
 
-module.exports = { send, sendDocument };
+module.exports = { send, sendDocument, mdSafe };
