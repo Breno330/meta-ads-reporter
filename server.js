@@ -34,6 +34,7 @@ if (missingEnv.length) {
 
 const express        = require('express');
 const session        = require('express-session');
+const FileStore      = require('session-file-store')(session);
 const path           = require('path');
 const fs             = require('fs');
 const cron           = require('node-cron');
@@ -85,7 +86,18 @@ app.use((req, res, next) => {
 // httpOnly: JS do browser não consegue ler o cookie (proteção XSS)
 // sameSite: bloqueia envio cross-site (proteção CSRF)
 const isProduction = process.env.NODE_ENV === 'production';
+const SESSION_MAX_AGE = 24 * 60 * 60 * 1000; // 24h
+
+// Sessões persistidas em disco (data/sessions/) — sobrevivem a restart/deploy.
+// Sem isso, o express-session usa MemoryStore e todo reinício desloga os usuários.
 app.use(session({
+  store: new FileStore({
+    path:    path.join(__dirname, 'data', 'sessions'),
+    ttl:     SESSION_MAX_AGE / 1000, // segundos
+    retries: 1,
+    reapInterval: 60 * 60,           // limpa sessões expiradas a cada 1h
+    logFn:   () => {}                // silencia logs verbosos do store
+  }),
   secret: process.env.SESSION_SECRET,
   resave: false,
   saveUninitialized: false,
@@ -93,7 +105,7 @@ app.use(session({
     secure:   isProduction,
     httpOnly: true,
     sameSite: 'lax',
-    maxAge:   24 * 60 * 60 * 1000
+    maxAge:   SESSION_MAX_AGE
   }
 }));
 
