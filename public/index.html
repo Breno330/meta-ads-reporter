@@ -3102,17 +3102,20 @@ async function checkAuth() {
       document.getElementById('login-screen').classList.remove('show');
       document.getElementById('app-layout').style.display = 'grid';
 
-      currentUser = { name: data.userName, days: data.daysRemaining };
-      const initials = data.userName.split(' ').map(w => w[0]).join('').slice(0, 2).toUpperCase();
+      // userName pode vir null (escopo OAuth sem acesso ao nome) — usa fallback
+      // para não quebrar o checkAuth inteiro e travar o carregamento das contas.
+      const userName = data.userName || 'Usuário';
+      currentUser = { name: userName, days: data.daysRemaining };
+      const initials = userName.split(' ').map(w => w[0]).join('').slice(0, 2).toUpperCase();
       // Sidebar (rodapé)
       document.getElementById('sidebar-avatar').textContent     = initials;
-      document.getElementById('sidebar-username').textContent   = data.userName;
+      document.getElementById('sidebar-username').textContent   = userName;
       document.getElementById('sidebar-token-days').textContent = `Token expira em ${data.daysRemaining}d`;
       // Topbar
       const topbarUser = document.getElementById('topbar-user');
       if (topbarUser) {
         document.getElementById('topbar-avatar').textContent = initials;
-        document.getElementById('topbar-username').textContent = data.userName;
+        document.getElementById('topbar-username').textContent = userName;
         // Exibe aviso de token apenas quando crítico (< 7 dias)
         const tokenDaysEl = document.getElementById('topbar-token-days');
         if (data.daysRemaining < 7) {

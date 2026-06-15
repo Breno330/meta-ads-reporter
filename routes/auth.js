@@ -31,7 +31,7 @@ setInterval(() => {
 const APP_ID       = process.env.META_APP_ID;
 const APP_SECRET   = process.env.META_APP_SECRET;
 const REDIRECT_URI = process.env.REDIRECT_URI || 'http://localhost:3000/auth/callback';
-const SCOPES       = 'ads_read,business_management,pages_read_engagement';
+const SCOPES       = 'public_profile,ads_read,business_management,pages_read_engagement';
 const API_VERSION  = 'v20.0';
 
 // Inicia o fluxo OAuth
@@ -142,8 +142,10 @@ router.get('/status', (req, res) => {
   const tokenValid   = tokenData && tokenData.expiresAt > Date.now();
   const sessionValid = !!req.session?.authenticated;
 
-  // Restaura sessão automaticamente se token válido e app desbloqueado
-  if (tokenValid && !sessionValid && req.session?.appUnlocked) {
+  // Restaura sessão automaticamente APENAS se o userId da sessão bate com o token
+  // Impede que um novo usuário herde automaticamente a sessão de outro
+  const sessionUserId = req.session?.userId;
+  if (tokenValid && !sessionValid && req.session?.appUnlocked && sessionUserId && sessionUserId === tokenData.userId) {
     req.session.authenticated = true;
     req.session.userName      = tokenData.userName;
     req.session.userId        = tokenData.userId;
