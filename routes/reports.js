@@ -155,4 +155,93 @@ router.delete('/links/:token', requireAuth, (req, res) => {
   }
 });
 
+// ── Relatório de Orçamento (pacing mensal — todas as contas) ─────────────────
+// Gera um relatório HTML consolidado: orçamento mensal vs gasto vs projeção,
+// classificando cada conta em no previsto / acima / abaixo do planejado.
+router.post('/budget', requireAuth, async (req, res) => {
+  try {
+    const config  = storage.getMonitorConfig();
+    if (!config?.accounts?.length) {
+      return res.status(400).json({ error: 'Nenhuma conta configurada no monitor.' });
+    }
+
+    const metaApi = require('../services/meta-api');
+    const MESES   = ['janeiro','fevereiro','março','abril','maio','junho','julho','agosto','setembro','outubro','novembro','dezembro'];
+
+    const today         = new Date();
+    const lastDay       = new Date(today.getFullYear(), today.getMonth() + 1, 0).getDate();
+    const dayOfMonth    = today.getDate();
+    const daysRemaining = lastDay - dayOfMonth;
+    const monthStart    = new Date(today.getFullYear(), today.getMonth(), 1);
+    const sinceStr      = monthStart.toISOString().split('T')[0];
+    const untilStr      = today.toISOString().split('T')[0];
+    const monthLabel    = `${MESES[today.getMonth()]} de ${today.getFullYear()}`;
+
+    // Busca gasto do mês + nome de cada conta (em paralelo)
+    const data = await Promise.all(config.accounts.map(async accountId => {
+      const monthlyBudget = parseFloat(config.monthlyBudgets?.[accountId]) || 0;
+      try {
+        const [insights, info] = await Promise.all([
+          metaApi.getInsights(req.token, accountId, sinceStr, untilStr),
+          fetch(`https://graph.facebook.com/v20.0/${accountId}?fields=name`, { headers: { Authorization: `Bearer ${req.token}` } }).then(r => r.json())
+        ]);
+        const spentSoFar     = insights.spend || 0;
+        const avgDailySpend  = dayOfMonth > 0 ? spentSoFar / dayOfMonth : 0;
+        const projectedTotal = spentSoFar + (avgDailySpend * daysRemaining);
+        return {
+          name:           info.name || accountId,
+          monthlyBudget,
+          spentSoFar,
+          projectedTotal,
+          paceRatio:      monthlyBudget > 0 ? projectedTotal / monthlyBudget : null,
+          pctUsed:        monthlyBudget > 0 ? (spentSoFar / monthlyBudget * 100) : 0
+        };
+      } catch (e) {
+        return { name: accountId, monthlyBudget, spentSoFar: 0, projectedTotal: 0, paceRatio: null, pctUsed: 0, error: e.message };
+      }
+    }));
+
+    const accounts = data.filter(a => a.monthlyBudget > 0 && !a.error);
+    const noBudget = data.filter(a => !a.monthlyBudget && !a.error).map(a => ({ name: a.name, spentSoFar: a.spentSoFar }));
+
+    const generatedAtStr = new Intl.DateTimeFormat('pt-BR', {
+      day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit', timeZone: 'America/Sao_Paulo'
+    }).format(today).replace(',', ' às');
+
+    const html = generator.generateBudgetReport({
+      accounts, noBudget, monthLabel, dayOfMonth, lastDay, daysRemaining,
+      agencyName: config.agencyName || '', agencyLogo: config.agencyLogo || '',
+      generatedAtStr
+    });
+
+    // Salva HTML + metadados (link público válido 90 dias)
+    ensureReportsDir();
+    cleanupExpired();
+    const token     = genToken();
+    const expiresAt = Date.now() + REPORT_TTL_MS;
+    const meta      = { token, accountName: 'Relatório de Orçamento', since: sinceStr, until: untilStr, reportType: 'orcamento', expiresAt, createdAt: Date.now() };
+    fs.writeFileSync(path.join(REPORTS_DIR, `${token}.html`), html, 'utf8');
+    fs.writeFileSync(path.join(REPORTS_DIR, `${token}.json`), JSON.stringify(meta), 'utf8');
+
+    const appBase  = process.env.APP_BASE_URL?.trim();
+    const proto    = req.headers['x-forwarded-proto'] || (req.secure ? 'https' : 'http');
+    const host     = req.headers['x-forwarded-host']  || req.headers.host;
+    const baseUrl  = appBase || `${proto}://${host}`;
+    const shareUrl = `${baseUrl}/r/${token}`;
+
+    res.json({
+      shareUrl, token, expiresAt,
+      summary: {
+        accounts: accounts.length,
+        noBudget: noBudget.length,
+        totalBudget:    accounts.reduce((s, a) => s + a.monthlyBudget, 0),
+        totalProjected: accounts.reduce((s, a) => s + a.projectedTotal, 0)
+      }
+    });
+  } catch (err) {
+    console.error('Erro ao gerar relatório de orçamento:', err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
+
 module.exports = router;

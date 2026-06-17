@@ -674,4 +674,221 @@ function toggleReportTheme(){applyReportTheme((localStorage.getItem('mf-report-t
 </html>`;
 }
 
-module.exports = { generate, buildChartsHtml, AVAILABLE_METRICS };
+// ── Relatório de Orçamento (pacing mensal — visão da agência) ─────────────────
+// Mostra, por conta, o orçamento mensal vs gasto até agora e a projeção de
+// fechamento do mês, classificando cada conta em: no previsto / acima / abaixo.
+function generateBudgetReport(opts) {
+  const {
+    accounts = [],        // contas COM orçamento: {name, monthlyBudget, spentSoFar, projectedTotal, paceRatio, pctUsed}
+    noBudget = [],        // contas SEM orçamento configurado: {name, spentSoFar}
+    monthLabel = '',      // ex: "junho de 2026"
+    dayOfMonth = 0, lastDay = 0, daysRemaining = 0,
+    agencyName = '', agencyLogo = '',
+    generatedAtStr = ''
+  } = opts;
+
+  // Classificação de status (banda de ±10% em torno do orçamento projetado)
+  function statusOf(pace) {
+    if (pace == null)   return { label: 'Sem dados',         color: '#537085', bg: 'var(--bg-secondary)' };
+    if (pace > 1.10)    return { label: 'Acima do planejado', color: '#E24B4A', bg: 'var(--bg-danger)'  };
+    if (pace < 0.90)    return { label: 'Abaixo do planejado',color: '#378ADD', bg: 'var(--bg-info)'    };
+    return                     { label: 'No previsto',        color: '#27A065', bg: 'var(--bg-success)' };
+  }
+
+  // Totais consolidados da agência
+  const totalBudget    = accounts.reduce((s, a) => s + (a.monthlyBudget || 0), 0);
+  const totalSpent     = accounts.reduce((s, a) => s + (a.spentSoFar || 0), 0);
+  const totalProjected = accounts.reduce((s, a) => s + (a.projectedTotal || 0), 0);
+  const overallPace    = totalBudget > 0 ? totalProjected / totalBudget : null;
+  const overallPctUsed = totalBudget > 0 ? (totalSpent / totalBudget * 100) : 0;
+  const overall        = statusOf(overallPace);
+  const diffProjected  = totalProjected - totalBudget; // + = estouro, - = sobra
+
+  // Ordena: piores (maior pace) primeiro, pra chamar atenção do dono
+  const ordered = [...accounts].sort((a, b) => (b.paceRatio || 0) - (a.paceRatio || 0));
+
+  const logoHtml = agencyLogo
+    ? `<img src="${agencyLogo}" alt="${agencyName}" style="height:28px;object-fit:contain;margin-bottom:6px;display:block">` : '';
+
+  // Linhas da tabela por conta
+  const rows = ordered.map(a => {
+    const st       = statusOf(a.paceRatio);
+    const pacePct  = a.paceRatio != null ? Math.round(a.paceRatio * 100) : null;
+    const barPct   = Math.min(100, Math.round((a.pctUsed || 0)));
+    const barColor = st.color;
+    return `
+    <tr>
+      <td style="padding:13px 14px;border-bottom:1px solid var(--border)">
+        <div style="font-size:13px;font-weight:600;color:var(--text-primary)">${a.name}</div>
+        <div style="margin-top:7px;height:5px;background:var(--bg-secondary);border-radius:3px;overflow:hidden;max-width:170px">
+          <div style="height:100%;width:${barPct}%;background:${barColor};border-radius:3px"></div>
+        </div>
+        <div style="font-size:9.5px;color:var(--text-muted);margin-top:3px">${(a.pctUsed||0).toFixed(0)}% do orçamento gasto</div>
+      </td>
+      <td style="padding:13px 14px;border-bottom:1px solid var(--border);text-align:right;font-variant-numeric:tabular-nums;color:var(--text-secondary)">${brl(a.monthlyBudget)}</td>
+      <td style="padding:13px 14px;border-bottom:1px solid var(--border);text-align:right;font-variant-numeric:tabular-nums;color:var(--text-primary);font-weight:600">${brl(a.spentSoFar)}</td>
+      <td style="padding:13px 14px;border-bottom:1px solid var(--border);text-align:right;font-variant-numeric:tabular-nums;color:var(--text-primary)">${brl(a.projectedTotal)}<div style="font-size:9.5px;color:${st.color};font-weight:700;margin-top:2px">${pacePct != null ? pacePct + '% do orç.' : ''}</div></td>
+      <td style="padding:13px 14px;border-bottom:1px solid var(--border);text-align:center">
+        <span style="display:inline-block;padding:3px 10px;border-radius:99px;background:${st.bg};color:${st.color};font-size:10px;font-weight:700;white-space:nowrap">${st.label}</span>
+      </td>
+    </tr>`;
+  }).join('');
+
+  const noBudgetHtml = noBudget.length ? `
+  <section style="max-width:940px;margin:0 auto;padding:0 40px 30px">
+    <div style="background:var(--bg-warning);border:1px solid #E8A02028;border-left:3px solid #E8A020;border-radius:0 8px 8px 0;padding:13px 16px">
+      <div style="font-size:11px;font-weight:700;color:#E8A020;text-transform:uppercase;letter-spacing:.08em;margin-bottom:6px">⚠ ${noBudget.length} conta${noBudget.length>1?'s':''} sem orçamento definido</div>
+      <div style="font-size:11.5px;color:var(--text-secondary);line-height:1.6">
+        Estas contas não entram no cálculo acima porque não têm orçamento mensal configurado:
+        <strong style="color:var(--text-primary)">${noBudget.map(n => n.name).join(', ')}</strong>.
+        Configure o orçamento delas em Configurações → Contas para incluí-las no monitoramento.
+      </div>
+    </div>
+  </section>` : '';
+
+  // Cards-resumo da agência
+  const kpiCard = (label, value, sub, accent) => `
+    <div style="background:var(--bg-card);border:1px solid var(--border);border-radius:10px;padding:18px 20px">
+      <div style="font-size:9.5px;font-weight:700;color:var(--text-muted);text-transform:uppercase;letter-spacing:.1em;margin-bottom:10px">${label}</div>
+      <div style="font-size:22px;font-weight:700;color:${accent||'var(--text-primary)'};line-height:1;font-variant-numeric:tabular-nums">${value}</div>
+      ${sub ? `<div style="font-size:10px;color:var(--text-muted);margin-top:6px">${sub}</div>` : ''}
+    </div>`;
+
+  return `<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Relatório de Orçamento — ${agencyName || 'Agência'}</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@300;400;500;700&family=DM+Serif+Display&display=swap" rel="stylesheet">
+<style>
+  :root {
+    --gold:#C9A84C; --gold-l:#E8C96A; --gold-bg:rgba(201,168,76,0.12); --gold-br:rgba(201,168,76,0.28);
+    --bg-page:#0D1B2A; --bg-card:#132132; --bg-secondary:#1C2E40; --bg-tertiary:#0F1D2C;
+    --bg-success:rgba(39,160,101,0.12); --bg-danger:rgba(226,75,74,0.12);
+    --bg-warning:rgba(232,160,32,0.12); --bg-info:rgba(24,95,165,0.12);
+    --text-primary:#E9E8E6; --text-secondary:#8EA8BE; --text-muted:#537085;
+    --border:rgba(255,255,255,0.08);
+  }
+  body.light-mode {
+    --bg-page:#F1F5F9; --bg-card:#FFFFFF; --bg-secondary:#EDF1F7; --bg-tertiary:#F8FAFC;
+    --bg-success:rgba(39,160,101,0.08); --bg-danger:rgba(226,75,74,0.08);
+    --bg-warning:rgba(232,160,32,0.08); --bg-info:rgba(24,95,165,0.08);
+    --text-primary:#1A2332; --text-secondary:#4A6070; --text-muted:#7A9488;
+    --border:rgba(0,0,0,0.09);
+  }
+  *,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
+  body{font-family:'DM Sans','Segoe UI',system-ui,sans-serif;background:var(--bg-page);color:var(--text-primary);min-height:100vh;transition:background .25s,color .25s}
+  .rpt-hdr{background:linear-gradient(135deg,#0D2235 0%,#103828 55%,#1A4A2E 100%);position:relative}
+  .hdr-accent{height:3px;background:linear-gradient(90deg,#C9A84C 0%,#E8C96A 50%,#C9A84C 100%)}
+  .hdr-inner{max-width:940px;margin:0 auto;padding:26px 40px 22px;display:grid;grid-template-columns:auto 1px 1fr auto;align-items:center;gap:0 24px}
+  .hdr-brand{display:flex;align-items:center;gap:11px;min-width:150px}
+  .brand-nm{display:block;font-size:17px;font-weight:700;color:#fff;letter-spacing:-.2px}
+  .brand-sb{display:block;font-size:8px;color:rgba(201,168,76,.65);letter-spacing:.14em;text-transform:uppercase;margin-top:2px}
+  .hdr-div{width:1px;height:58px;background:rgba(255,255,255,.12);align-self:center}
+  .report-badge{display:inline-flex;flex-direction:column;border:1px solid var(--gold-br);background:var(--gold-bg);border-radius:4px;padding:3px 9px;margin-bottom:9px}
+  .report-badge span{font-size:8px;font-weight:700;color:var(--gold);letter-spacing:.16em;text-transform:uppercase;line-height:1.4}
+  .rpt-title{font-family:'DM Serif Display',Georgia,serif;font-size:22px;color:#fff;margin:0 0 9px;line-height:1.2}
+  .rpt-period-txt{font-size:11px;color:rgba(201,168,76,.7)}
+  .hdr-period-box{border:1px solid var(--gold-br);border-radius:8px;padding:13px 17px;min-width:158px;text-align:right;background:rgba(0,0,0,.18)}
+  .pb-label{display:block;font-size:8px;font-weight:700;color:rgba(201,168,76,.5);letter-spacing:.16em;text-transform:uppercase;margin-bottom:5px}
+  .pb-date{display:block;font-size:17px;font-weight:700;color:#fff;line-height:1.2}
+  .pb-cmp{display:block;font-size:9px;color:rgba(201,168,76,.5);margin-top:5px;line-height:1.4}
+  main{max-width:940px;margin:0 auto;padding:28px 40px}
+  .section-title{font-size:10px;font-weight:700;color:var(--gold);text-transform:uppercase;letter-spacing:.14em;margin:0 0 14px;padding-bottom:10px;border-bottom:1px solid var(--border)}
+  table{width:100%;border-collapse:collapse;background:var(--bg-card);border:1px solid var(--border);border-radius:12px;overflow:hidden}
+  thead th{font-size:9.5px;font-weight:700;color:var(--text-muted);text-transform:uppercase;letter-spacing:.08em;padding:12px 14px;background:var(--bg-tertiary);border-bottom:1px solid var(--border)}
+  .report-theme-btn{position:fixed;bottom:24px;right:24px;z-index:999;display:flex;align-items:center;gap:7px;padding:10px 16px;border-radius:999px;border:1px solid var(--border);background:var(--bg-card);color:var(--text-muted);font-size:12px;font-weight:600;cursor:pointer;box-shadow:0 4px 20px rgba(0,0,0,.4)}
+  .report-pdf-btn{position:fixed;bottom:24px;right:170px;z-index:999;display:flex;align-items:center;gap:7px;padding:10px 18px;border-radius:999px;border:1px solid var(--gold);background:var(--gold);color:#1C2B1E;font-size:12px;font-weight:700;cursor:pointer;box-shadow:0 4px 20px rgba(201,168,76,.35)}
+  @media print{.report-pdf-btn,.report-theme-btn{display:none!important}*{-webkit-print-color-adjust:exact!important;print-color-adjust:exact!important}@page{size:A4;margin:12mm 14mm}section,table{page-break-inside:avoid}}
+  @media(max-width:680px){.hdr-inner{grid-template-columns:1fr;gap:14px}.hdr-div{display:none}.hdr-period-box{text-align:left}main{padding:20px}thead th:nth-child(2),td:nth-child(2){display:none}}
+</style>
+<script>(function(){var t=localStorage.getItem('mf-report-theme')||'dark';if(t==='light')document.body.classList.add('light-mode');})();<\/script>
+</head>
+<body>
+
+<div class="rpt-hdr">
+  <div class="hdr-accent"></div>
+  <div class="hdr-inner">
+    <div class="hdr-brand">
+      ${logoHtml}
+      <div>
+        <span class="brand-nm">${agencyName || 'Multiform'}</span>
+        <span class="brand-sb">Relatório de Orçamento</span>
+      </div>
+    </div>
+    <div class="hdr-div"></div>
+    <div>
+      <div class="report-badge"><span>Controle de</span><span>Orçamento</span></div>
+      <h1 class="rpt-title">Acompanhamento de Gastos</h1>
+      <div class="rpt-period-txt">Mês de ${monthLabel} · dia ${dayOfMonth} de ${lastDay} · faltam ${daysRemaining} dia${daysRemaining!==1?'s':''}</div>
+    </div>
+    <div class="hdr-period-box">
+      <span class="pb-label">Status geral</span>
+      <span class="pb-date" style="color:${overall.color}">${overall.label}</span>
+      <span class="pb-cmp">${overallPace != null ? Math.round(overallPace*100) + '% do orçamento projetado' : 'sem orçamento definido'}</span>
+    </div>
+  </div>
+</div>
+
+<main>
+  <!-- Resumo consolidado da agência -->
+  <section style="margin-bottom:28px">
+    <div class="section-title">Resumo da Agência — ${monthLabel}</div>
+    <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:12px">
+      ${kpiCard('Orçamento total', brl(totalBudget), `${accounts.length} conta${accounts.length!==1?'s':''} com orçamento`)}
+      ${kpiCard('Gasto até agora', brl(totalSpent), `${overallPctUsed.toFixed(0)}% do orçamento`)}
+      ${kpiCard('Projeção fim do mês', brl(totalProjected), overallPace != null ? `${Math.round(overallPace*100)}% do orçamento` : '—', overall.color)}
+      ${kpiCard(diffProjected >= 0 ? 'Estouro projetado' : 'Sobra projetada', brl(Math.abs(diffProjected)), diffProjected >= 0 ? 'acima do planejado' : 'abaixo do planejado', diffProjected > 0 ? '#E24B4A' : '#27A065')}
+    </div>
+    <div style="margin-top:14px;background:${overall.bg};border:1px solid ${overall.color}28;border-left:3px solid ${overall.color};border-radius:0 8px 8px 0;padding:14px 16px">
+      <div style="font-size:13px;font-weight:700;color:${overall.color};margin-bottom:4px">${overall.label}</div>
+      <div style="font-size:12px;color:var(--text-secondary);line-height:1.6">
+        ${overallPace == null
+          ? 'Nenhuma conta tem orçamento mensal configurado. Configure os orçamentos para acompanhar o ritmo de gasto.'
+          : diffProjected > 0
+            ? `No ritmo atual, a projeção de fechamento é de <strong style="color:var(--text-primary)">${brl(totalProjected)}</strong>, ou seja <strong style="color:${overall.color}">${brl(diffProjected)} acima</strong> do orçamento total de ${brl(totalBudget)}.`
+            : `No ritmo atual, a projeção de fechamento é de <strong style="color:var(--text-primary)">${brl(totalProjected)}</strong>, dentro do orçamento total de ${brl(totalBudget)} (sobra projetada de ${brl(Math.abs(diffProjected))}).`}
+      </div>
+    </div>
+  </section>
+
+  <!-- Detalhamento por conta -->
+  <section style="margin-bottom:24px">
+    <div class="section-title">Detalhamento por Conta</div>
+    <table>
+      <thead>
+        <tr>
+          <th style="text-align:left">Conta</th>
+          <th style="text-align:right">Orçamento</th>
+          <th style="text-align:right">Gasto até agora</th>
+          <th style="text-align:right">Projeção fim do mês</th>
+          <th style="text-align:center">Status</th>
+        </tr>
+      </thead>
+      <tbody>
+        ${rows || `<tr><td colspan="5" style="padding:24px;text-align:center;color:var(--text-muted);font-size:12px">Nenhuma conta com orçamento configurado.</td></tr>`}
+      </tbody>
+    </table>
+  </section>
+</main>
+
+${noBudgetHtml}
+
+<footer style="max-width:940px;margin:0 auto;padding:8px 40px 40px;color:var(--text-muted);font-size:10px;border-top:1px solid var(--border)">
+  <div style="padding-top:14px;display:flex;justify-content:space-between;flex-wrap:wrap;gap:8px">
+    <span>Gerado em ${generatedAtStr}</span>
+    <span>${agencyName || 'Multiform'} · Meta Ads Reporter</span>
+  </div>
+</footer>
+
+<button class="report-pdf-btn" onclick="window.print()">📄 Salvar PDF</button>
+<button class="report-theme-btn" onclick="(function(){var d=document.body.classList.toggle('light-mode');localStorage.setItem('mf-report-theme',d?'light':'dark');})()">🌓 Tema</button>
+
+</body>
+</html>`;
+}
+
+module.exports = { generate, buildChartsHtml, AVAILABLE_METRICS, generateBudgetReport };
