@@ -2,10 +2,20 @@ services:
   - type: web
     name: meta-ads-reporter
     runtime: node
-    plan: free
+    # Disco persistente e "sempre ligado" exigem plano pago (Starter+).
+    # No plano free os dados em data/ sao apagados a cada sleep/deploy.
+    plan: starter
     buildCommand: npm install
     startCommand: node server.js
     healthCheckPath: /
+    # IMPORTANTE: o disco precisa ficar ANINHADO dentro do servico (e como
+    # objeto unico, nao lista). Se ficar no topo do arquivo, o Render ignora.
+    # mountPath aponta exatamente para a pasta data/ que o app usa
+    # (path.join(__dirname, 'data') -> /opt/render/project/src/data).
+    disk:
+      name: data
+      mountPath: /opt/render/project/src/data
+      sizeGB: 1
     envVars:
       - key: NODE_ENV
         value: production
@@ -23,8 +33,3 @@ services:
         sync: false
       - key: APP_BASE_URL
         sync: false
-
-disk:
-  - name: data
-    mountPath: /opt/render/project/src/data
-    sizeGB: 1
