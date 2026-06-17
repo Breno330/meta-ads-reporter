@@ -160,12 +160,21 @@ router.delete('/links/:token', requireAuth, (req, res) => {
 // classificando cada conta em no previsto / acima / abaixo do planejado.
 router.post('/budget', requireAuth, async (req, res) => {
   try {
-    const config  = storage.getMonitorConfig();
-    if (!config?.accounts?.length) {
-      return res.status(400).json({ error: 'Nenhuma conta configurada no monitor.' });
+    const config  = storage.getMonitorConfig() || {};
+    const metaApi = require('../services/meta-api');
+
+    // Lista de contas: une as monitoradas + as que têm orçamento definido.
+    // Se nada estiver configurado, cai para TODAS as contas acessíveis pelo token.
+    const monitored = Array.isArray(config.accounts) ? config.accounts : [];
+    const budgetIds = Object.keys(config.monthlyBudgets || {});
+    let candidateIds = [...new Set([...monitored, ...budgetIds])];
+    if (!candidateIds.length) {
+      try { candidateIds = (await metaApi.getAdAccounts(req.token)).map(a => a.id); } catch {}
+    }
+    if (!candidateIds.length) {
+      return res.status(400).json({ error: 'Nenhuma conta encontrada para este token.' });
     }
 
-    const metaApi = require('../services/meta-api');
     const MESES   = ['janeiro','fevereiro','março','abril','maio','junho','julho','agosto','setembro','outubro','novembro','dezembro'];
 
     const today         = new Date();
@@ -178,7 +187,7 @@ router.post('/budget', requireAuth, async (req, res) => {
     const monthLabel    = `${MESES[today.getMonth()]} de ${today.getFullYear()}`;
 
     // Busca gasto do mês + nome de cada conta (em paralelo)
-    const data = await Promise.all(config.accounts.map(async accountId => {
+    const data = await Promise.all(candidateIds.map(async accountId => {
       const monthlyBudget = parseFloat(config.monthlyBudgets?.[accountId]) || 0;
       try {
         const [insights, info] = await Promise.all([
