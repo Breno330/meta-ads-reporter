@@ -4652,6 +4652,7 @@ function renderCreativesGrid() {
         <div class="creative-body">
           <div class="creative-name" title="${escHtml(c.name)}">${escHtml(c.name)}</div>
           <div class="creative-camp" title="${escHtml(c.campaignName)}">${escHtml(c.campaignName)}</div>
+          ${c.daysRunning != null ? `<div style="font-size:10px;color:var(--muted);margin-top:3px;display:flex;align-items:center;gap:4px"><svg xmlns="http://www.w3.org/2000/svg" width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>${c.daysRunning} ${c.daysRunning === 1 ? 'dia' : 'dias'} no ar</div>` : ''}
 
           <!-- Mensagens: métrica principal -->
           <div style="display:flex;gap:8px;margin:6px 0">

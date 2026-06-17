@@ -284,20 +284,26 @@ async function getCreativeInsights(token, accountId, since, until) {
 
   if (!allRows.length) return [];
 
-  // 2. Busca thumbnails dos criativos em lotes de 50
+  // 2. Busca thumbnails (em alta) + data de criação dos anúncios, em lotes de 50
   const adIds      = [...new Set(allRows.map(a => a.ad_id))];
   const thumbMap   = {};
+  const createdMap = {};
   const chunkSize  = 50;
 
   for (let i = 0; i < adIds.length; i += chunkSize) {
     const chunk    = adIds.slice(i, i + chunkSize);
     const filter   = encodeURIComponent(JSON.stringify([{ field: 'id', operator: 'IN', value: chunk }]));
-    const adsUrl   = `${BASE}/${accountId}/ads?fields=id,name,creative{thumbnail_url,object_type,name}&filtering=${filter}&limit=50`;
+    // thumbnail_width/height pedem uma miniatura maior (~400px), muito mais nítida
+    // que o thumbnail padrão (~64px). image_url, quando existe, é a imagem cheia.
+    const adsUrl   = `${BASE}/${accountId}/ads?fields=id,name,created_time,creative.thumbnail_width(400).thumbnail_height(400){thumbnail_url,image_url,object_type,name}&filtering=${filter}&limit=50`;
     try {
       const adsRes  = await apiFetch(adsUrl, token);
       const adsData = await adsRes.json();
       (adsData.data || []).forEach(ad => {
-        if (ad.creative?.thumbnail_url) thumbMap[ad.id] = ad.creative.thumbnail_url;
+        const cr  = ad.creative || {};
+        const img = cr.image_url || cr.thumbnail_url; // prefere imagem cheia
+        if (img) thumbMap[ad.id] = img;
+        if (ad.created_time) createdMap[ad.id] = ad.created_time;
       });
     } catch { /* thumbnail opcional — falha silenciosa */ }
   }
@@ -315,6 +321,12 @@ async function getCreativeInsights(token, accountId, since, until) {
     const results    = messages || purchases || leads || 0; // melhor resultado disponível
     const clicks     = parseInt(a.clicks || 0);
     const impressions= parseInt(a.impressions || 0);
+
+    // Dias rodando: a partir da data de criação do anúncio
+    const createdAt   = createdMap[a.ad_id] || null;
+    const daysRunning = createdAt
+      ? Math.max(0, Math.floor((Date.now() - new Date(createdAt).getTime()) / 86400000))
+      : null;
 
     return {
       adId:             a.ad_id,
@@ -337,7 +349,9 @@ async function getCreativeInsights(token, accountId, since, until) {
       costPerMessage:   messages > 0 ? spend / messages : null,
       costPerClick:     clicks > 0   ? spend / clicks   : null,
       hookRate:         impressions > 0 ? (clicks / impressions) * 100 : 0,
-      thumbnailUrl:     thumbMap[a.ad_id] || null
+      thumbnailUrl:     thumbMap[a.ad_id] || null,
+      createdTime:      createdAt,
+      daysRunning
     };
   });
 }
