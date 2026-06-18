@@ -354,7 +354,7 @@ const AVAILABLE_METRICS = [
 // ── Relatório principal ───────────────────────────────────────────────────────
 function generate(opts) {
   // enabledMetrics: array de keys (ex: ['spend','reach','messages']). Se null → auto-detect.
-  const { accountName, since, until, reportType, current, previous, agencyName, agencyLogo, ageBreakdown = [], enabledMetrics = null } = opts;
+  const { accountName, since, until, reportType, current, previous, agencyName, agencyLogo, ageBreakdown = [], enabledMetrics = null, instagramFollowers = null } = opts;
 
   // Período
   const periodLabel = reportType === 'mensal' ? `Mês de ${monthYear(since)}` : `Semana de ${dateBR(since)} a ${dateBR(until)}`;
@@ -490,6 +490,24 @@ function generate(opts) {
     </div>
   </section>`;
 
+  // Bloco de seguidores do Instagram — só quando houve campanha de seguidores
+  // no período (totalFollowers > 0) e o IG foi resolvido pelo chamador.
+  const igFollowersHtml = (instagramFollowers && instagramFollowers.followers != null && totalFollowers > 0)
+    ? `
+  <section style="margin-bottom:28px">
+    <div style="display:flex;align-items:center;gap:16px;background:var(--bg-card);border:1px solid var(--border);border-radius:12px;padding:20px 24px">
+      <div style="width:48px;height:48px;border-radius:13px;background:linear-gradient(135deg,#feda75,#d62976 45%,#962fbf 75%,#4f5bd5);display:flex;align-items:center;justify-content:center;flex-shrink:0">
+        <svg xmlns="http://www.w3.org/2000/svg" width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="2"><rect width="20" height="20" x="2" y="2" rx="5"/><circle cx="12" cy="12" r="4"/><circle cx="17.5" cy="6.5" r="1" fill="#fff" stroke="none"/></svg>
+      </div>
+      <div style="flex:1">
+        <div style="font-size:10px;font-weight:700;color:var(--text-muted);text-transform:uppercase;letter-spacing:.1em">Seguidores no Instagram${instagramFollowers.username ? ' · @' + instagramFollowers.username : ''}</div>
+        <div style="font-size:30px;font-weight:700;color:var(--text-primary);line-height:1.1">${num(instagramFollowers.followers)}</div>
+        <div style="font-size:12px;color:#27A065;font-weight:600;margin-top:3px">+${num(totalFollowers)} novos seguidores no período via campanha</div>
+      </div>
+    </div>
+  </section>`
+    : '';
+
   return `<!DOCTYPE html>
 <html lang="pt-BR">
 <head>
@@ -623,6 +641,9 @@ function generate(opts) {
     </div>
   </section>
   <!-- Nota: grid repeat(3,1fr) com 9 cards = 3 linhas × 3 colunas -->
+
+  <!-- 4b. SEGUIDORES INSTAGRAM (condicional) -->
+  ${igFollowersHtml}
 
   <!-- 5. VISUAL -->
   ${chartsHtml}

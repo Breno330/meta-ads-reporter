@@ -388,4 +388,33 @@ async function getAgeBreakdownInsights(token, accountId, since, until) {
   }
 }
 
-module.exports = { getAdAccounts, getInsights, getAdLevelInsights, getPlacementInsights, getCreativeInsights, getAgeBreakdownInsights };
+// ── Total de seguidores no Instagram da conta (best-effort) ───────────────────
+// Resolve o IG comercial via: anúncio recente → page_id → instagram_business_account.
+// Retorna null quando o vínculo não é legível com o token/escopos atuais
+// (ex.: página sem IG comercial acessível). Usado só quando há campanha de
+// seguidores no período — o chamador decide quando buscar.
+async function getInstagramFollowers(token, accountId) {
+  try {
+    const adsRes  = await apiFetch(`${BASE}/${accountId}/ads?fields=creative{object_story_spec{page_id},instagram_actor_id}&limit=8`, token);
+    const adsData = await adsRes.json();
+    if (adsData.error) return null;
+
+    let pageId = null;
+    for (const ad of (adsData.data || [])) {
+      pageId = ad.creative?.object_story_spec?.page_id;
+      if (pageId) break;
+    }
+    if (!pageId) return null;
+
+    const pgRes = await apiFetch(`${BASE}/${pageId}?fields=instagram_business_account{username,followers_count}`, token);
+    const pg    = await pgRes.json();
+    const ig    = pg.instagram_business_account;
+    if (!ig || ig.followers_count == null) return null;
+
+    return { username: ig.username || null, followers: ig.followers_count };
+  } catch {
+    return null;
+  }
+}
+
+module.exports = { getAdAccounts, getInsights, getAdLevelInsights, getPlacementInsights, getCreativeInsights, getAgeBreakdownInsights, getInstagramFollowers };

@@ -66,6 +66,12 @@ router.post('/generate', requireAuth, async (req, res) => {
     ageBreakdown = await metaApi.getAgeBreakdownInsights(req.token, accountId, since, until);
   } catch {}
 
+  // Seguidores do Instagram — só busca quando houve campanha de seguidores no período
+  let instagramFollowers = null;
+  if ((current.followers || 0) > 0) {
+    try { instagramFollowers = await metaApi.getInstagramFollowers(req.token, accountId); } catch {}
+  }
+
   try {
     const html = generator.generate({
       accountName,
@@ -76,7 +82,8 @@ router.post('/generate', requireAuth, async (req, res) => {
       followers:     followers ? parseInt(followers) : null,
       current,
       previous,
-      ageBreakdown
+      ageBreakdown,
+      instagramFollowers
     });
 
     // Salva HTML + metadados com token único

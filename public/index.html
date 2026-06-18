@@ -2473,6 +2473,8 @@ select.form-input { cursor: pointer; }
             <div class="chart-label">Gasto diário × Mensagens</div>
             <canvas id="dash-chart-line" height="80"></canvas>
           </div>
+          <!-- Seguidores do Instagram — só aparece quando há campanha de seguidores no período -->
+          <div id="dash-ig-followers" style="display:none;margin-bottom:20px"></div>
           <div class="dash-chart-2col">
             <div>
               <div class="chart-label">Funil de conversão</div>
@@ -3462,6 +3464,7 @@ async function fetchData() {
     const _idHdr = document.getElementById('client-id-header');
     if (_idHdr) _idHdr.innerHTML = `${selectedAccount.id} <span class="update-ts" style="font-size:11px;color:var(--muted);margin-left:6px">Atualizado às ${_tsStr}</span>`;
     renderDashboard(data);
+    loadInstagramFollowers(selectedAccount.id, data);
     loadPlacementInsights();
     loadTrendHistory();
 
@@ -3948,6 +3951,40 @@ function buildCampaignMetricCards(c) {
 
 function brlFmt(v) {
   return new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(v || 0);
+}
+
+// Seguidores do Instagram — só quando houve campanha de seguidores no período
+// e quando o vínculo conta→página→IG for legível (senão fica silencioso).
+async function loadInstagramFollowers(accountId, data) {
+  const el = document.getElementById('dash-ig-followers');
+  if (!el) return;
+  el.style.display = 'none';
+  el.innerHTML = '';
+
+  const teveFollows = (data.followers || 0) > 0
+    || (data.campaigns || []).some(c => (c.followers || 0) > 0);
+  if (!teveFollows) return; // sem campanha de seguidores → não mostra nada
+
+  try {
+    const r  = await fetch(`/api/insights/instagram-followers?accountId=${encodeURIComponent(accountId)}`);
+    const ig = await r.json();
+    if (!ig || ig.followers == null) return; // não resolveu o IG → silencioso
+
+    const fmtN   = v => new Intl.NumberFormat('pt-BR').format(v || 0);
+    const handle = ig.username ? '@' + ig.username : 'Instagram';
+    el.innerHTML = `
+      <div style="display:flex;align-items:center;gap:14px;background:var(--surface);border:1px solid var(--border);border-radius:12px;padding:16px 18px">
+        <div style="width:42px;height:42px;border-radius:11px;background:linear-gradient(135deg,#feda75,#d62976 45%,#962fbf 75%,#4f5bd5);display:flex;align-items:center;justify-content:center;flex-shrink:0">
+          <svg xmlns="http://www.w3.org/2000/svg" width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="2"><rect width="20" height="20" x="2" y="2" rx="5"/><circle cx="12" cy="12" r="4"/><circle cx="17.5" cy="6.5" r="1" fill="#fff" stroke="none"/></svg>
+        </div>
+        <div style="flex:1;min-width:0">
+          <div style="font-size:10px;color:var(--muted);font-weight:700;text-transform:uppercase;letter-spacing:.05em">Seguidores no Instagram · ${handle}</div>
+          <div style="font-size:26px;font-weight:700;color:var(--text);line-height:1.1">${fmtN(ig.followers)}</div>
+          ${(data.followers || 0) > 0 ? `<div style="font-size:11px;color:var(--success);margin-top:2px">+${fmtN(data.followers)} via campanha no período</div>` : ''}
+        </div>
+      </div>`;
+    el.style.display = '';
+  } catch { /* silencioso */ }
 }
 
 function renderDashboard(data) {

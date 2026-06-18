@@ -67,6 +67,19 @@ router.get('/placements', requireAuth, async (req, res) => {
   }
 });
 
+// Total de seguidores no Instagram (best-effort — { followers: null } quando não resolve)
+router.get('/instagram-followers', requireAuth, async (req, res) => {
+  const { accountId } = req.query;
+  if (!accountId) return res.status(400).json({ error: 'accountId obrigatório.' });
+  try {
+    const token = req.getTokenForAccount ? req.getTokenForAccount(accountId) : req.token;
+    const ig    = await metaApi.getInstagramFollowers(token, accountId);
+    res.json(ig || { followers: null });
+  } catch {
+    res.json({ followers: null });
+  }
+});
+
 // Snapshots históricos de métricas
 router.get('/snapshots', requireAuth, (req, res) => {
   const { accountId, days } = req.query;

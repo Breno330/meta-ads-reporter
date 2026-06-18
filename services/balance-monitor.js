@@ -544,13 +544,19 @@ async function runWeeklyReportsForUser(userId, reportType) {
       // Métricas configuradas por conta (null = auto-detect)
       const enabledMetrics = config.reportMetrics?.[accountId] || null;
 
+      // Seguidores do Instagram — só busca quando houve campanha de seguidores no período
+      let instagramFollowers = null;
+      if ((data.followers || 0) > 0) {
+        try { instagramFollowers = await metaApi.getInstagramFollowers(tokenData.token, accountId); } catch {}
+      }
+
       // Gera HTML do relatório
       const html = reportGenerator.generate({
         accountName, since: sinceStr, until: untilStr,
         reportType: isMensal ? 'mensal' : 'semanal',
         current: data, previous: prev,
         agencyName: config.agencyName || '', agencyLogo: config.agencyLogo || '',
-        enabledMetrics
+        enabledMetrics, instagramFollowers
       });
 
       // Formatos
