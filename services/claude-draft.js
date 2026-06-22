@@ -339,4 +339,86 @@ Qualquer dúvida, fico à disposição!
 📎 Caso queiram acessar o relatório completo, segue o link: [LINK_AQUI]`;
 }
 
-module.exports = { generateClaudeDraft, generateMonthlyAnalysis };
+/**
+ * Gera APENAS os dois parágrafos interpretativos do resumo semanal:
+ *   • "Nossa leitura"      — interpretação do desempenho da semana
+ *   • "Decisão da semana"  — próxima ação
+ * Os números (investimento, mensagens, custo/msg) NÃO são gerados aqui —
+ * o chamador monta isso de forma determinística. Cai em texto-padrão se a
+ * API key não estiver configurada ou der erro.
+ *
+ * @param {object} opts — { accountName, current, previous, claudeStyle }
+ * @returns {Promise<{leitura: string, decisao: string, source: 'claude'|'rule-based'}>}
+ */
+async function generateWeeklyReading(opts = {}) {
+  const { current = {}, previous = null, claudeStyle = '' } = opts;
+  const apiKey = process.env.ANTHROPIC_API_KEY?.trim();
+
+  const cpmDelta = (previous?.costPerMessage > 0 && current.costPerMessage > 0)
+    ? ((current.costPerMessage - previous.costPerMessage) / previous.costPerMessage) * 100
+    : null;
+
+  // Texto-padrão (fallback) — adapta a leitura à direção do custo por mensagem
+  function fallback() {
+    const baixou = cpmDelta != null && cpmDelta < -2;
+    const subiu  = cpmDelta != null && cpmDelta > 2;
+    const leitura = baixou
+      ? 'A campanha manteve boa estabilidade durante a semana, gerando mais oportunidades com um custo menor. Neste momento, não identificamos necessidade de mudanças estruturais e seguiremos acompanhando a evolução dos indicadores.'
+      : subiu
+        ? 'Nesta semana o custo por mensagem subiu um pouco em relação ao período anterior. Vamos acompanhar de perto e ajustar a entrega para retomar a eficiência das últimas semanas.'
+        : 'A campanha seguiu estável durante a semana, mantendo um bom volume de oportunidades. Seguiremos monitorando os indicadores de perto para garantir a melhor performance.';
+    const decisao = 'Nesta semana, vamos iniciar testes com novos criativos para identificar oportunidades de reduzir ainda mais o custo por mensagem e manter a campanha evoluindo de forma consistente.';
+    return { leitura, decisao, source: 'rule-based' };
+  }
+
+  if (!apiKey) return fallback();
+
+  const brl = v => new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(v || 0);
+  const fmt = v => new Intl.NumberFormat('pt-BR').format(v || 0);
+
+  const ctx = [
+    `Mensagens na semana: ${fmt(current.messages)}`,
+    `Custo por mensagem: ${brl(current.costPerMessage)}`,
+    `Investimento: ${brl(current.spend)}`,
+    cpmDelta != null
+      ? `Variação do custo por mensagem vs. semana anterior: ${cpmDelta > 0 ? '+' : ''}${cpmDelta.toFixed(0)}%`
+      : 'Sem semana anterior para comparar',
+  ].join('\n');
+
+  const styleBlock = claudeStyle.trim()
+    ? `\nESTILO DO GESTOR (siga o tom):\n${claudeStyle.trim()}\n`
+    : '';
+
+  const systemPrompt = `Você é o assistente de um gestor de tráfego pago. Escreva dois trechos curtos para a mensagem semanal ao cliente, em português brasileiro.
+${styleBlock}
+REGRAS:
+- TEXTO PURO, sem markdown, sem emojis, sem títulos.
+- NÃO repita números (investimento, mensagens, custo) — eles já aparecem antes no resumo.
+- Não use termos técnicos (CTR, CPM, frequência). Linguagem simples e profissional.
+- Cada trecho com 1 a 2 frases, no máximo.
+
+Responda APENAS com um JSON válido, sem texto fora dele, neste formato:
+{"leitura":"<interpretação do desempenho da semana>","decisao":"<a próxima ação/decisão para a próxima semana>"}`;
+
+  try {
+    const client  = new Anthropic({ apiKey });
+    const message = await client.messages.create({
+      model:      'claude-haiku-4-5',
+      max_tokens: 350,
+      system:     systemPrompt,
+      messages: [{ role: 'user', content: `Dados da semana:\n${ctx}` }],
+    });
+    const raw = message.content?.[0]?.text?.trim() || '';
+    const json = raw.slice(raw.indexOf('{'), raw.lastIndexOf('}') + 1);
+    const parsed = JSON.parse(json);
+    const leitura = (parsed.leitura || '').trim();
+    const decisao = (parsed.decisao || '').trim();
+    if (!leitura || !decisao) throw new Error('Resposta incompleta do Claude');
+    return { leitura, decisao, source: 'claude' };
+  } catch (err) {
+    console.error('[claude-draft] generateWeeklyReading falhou, usando texto-padrão:', err.message);
+    return fallback();
+  }
+}
+
+module.exports = { generateClaudeDraft, generateMonthlyAnalysis, generateWeeklyReading };

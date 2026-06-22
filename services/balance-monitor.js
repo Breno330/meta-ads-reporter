@@ -512,7 +512,7 @@ async function runWeeklyReportsForUser(userId, reportType) {
 
   const metaApi         = require('./meta-api');
   const reportGenerator = require('./report-generator');
-  const { generateMonthlyAnalysis } = require('./claude-draft');
+  const { generateMonthlyAnalysis, generateWeeklyReading } = require('./claude-draft');
   const results         = [];
 
   // Para o relatório mensal, calcula também o 3º mês (2 meses atrás)
@@ -655,8 +655,21 @@ async function runWeeklyReportsForUser(userId, reportType) {
           ? rawAnalysis.replace('[LINK_AQUI]', shareUrl)
           : rawAnalysis.replace('\n📎 Caso queiram acessar o relatório completo, segue o link: [LINK_AQUI]', '');
       } else {
-        // ── Relatório semanal: formato original ───────────────────────────────
+        // ── Relatório semanal ─────────────────────────────────────────────────
         const tipoLabel = 'SEMANAL';
+
+        // Variação do custo por mensagem vs. semana anterior (pro resumo)
+        const cpmDelta = (prev?.costPerMessage > 0 && data.costPerMessage > 0)
+          ? delta(data.costPerMessage, prev.costPerMessage) : null;
+        const cpmDeltaStr = cpmDelta != null
+          ? ` (${cpmDelta <= 0 ? '↓' : '↑'} ${Math.abs(cpmDelta).toFixed(0)}% em relação à semana anterior)`
+          : '';
+
+        // Leitura + decisão geradas por IA (fallback automático se a API falhar)
+        const reading = await generateWeeklyReading({
+          accountName, current: data, previous: prev, claudeStyle: config.claudeStyle || ''
+        });
+
         msg = [
           `📊 *RELATÓRIO ${tipoLabel} — ${telegram.mdSafe(accountName.toUpperCase())}*`,
           ``,
@@ -675,11 +688,22 @@ async function runWeeklyReportsForUser(userId, reportType) {
           ``,
           `─ SUGESTÃO DE MENSAGEM AO CLIENTE ─`,
           ``,
-          `Bom dia!`,
+          `Bom dia, pessoal! 👋`,
           ``,
-          `✅ Análise do período ${dateBR(sinceStr)} a ${dateBR(untilStr)}.`,
+          `📊 Segue o resumo da semana (${dateBR(sinceStr)} a ${dateBR(untilStr)}):`,
+          `• Investimento: ${brl(data.spend)}`,
+          `• Mensagens: ${fmt(data.messages)}`,
+          `• Custo por mensagem: ${brl(data.costPerMessage)}${cpmDeltaStr}`,
           ``,
-          clientLines.join('\n'),
+          `📌 Nossa leitura`,
+          reading.leitura,
+          ``,
+          `🎯 Decisão da semana`,
+          reading.decisao,
+          ``,
+          `📈 Precisamos do feedback de vocês`,
+          `Como foi o movimento da loja nesta semana? Os clientes dos anúncios chegaram até a unidade?`,
+          `Quais produtos tiveram maior saída ou receberam mais procura durante a semana?`,
           ``,
           `📎 Caso queiram acessar o relatório completo, segue o link: ${shareUrl || '[LINK_AQUI]'}`
         ].join('\n');
